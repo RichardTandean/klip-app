@@ -47,7 +47,7 @@ klip-saas/
 ├── apps/
 │   ├── backend/              # NestJS 11 (REST API + BullMQ workers + WebSocket)
 │   ├── frontend/             # Next.js 15 App Router (Tailwind + shadcn/ui + Video.js)
-│   └── langgraph-agent/      # Python FastAPI + LangGraph (6-node AI state graph)
+│   └── langgraph-agent/      # Python FastAPI + LangGraph (4-node AI state graph)
 ├── packages/
 │   ├── shared/               # Zod schemas shared between frontend & backend
 │   ├── remotion-mcp/         # MCP HTTP Server → Remotion renderer proxy
@@ -64,7 +64,7 @@ klip-saas/
 |-----------|------|------|---------|
 | `klip-frontend` | Next.js 15 | 3000 | User-facing web app |
 | `klip-backend` | NestJS 11 | 8000 | REST API + 6 BullMQ queues + WebSocket |
-| `klip-langgraph-agent` | Python/FastAPI | 8001 | AI clip analysis (6-node state graph via Deepseek) |
+| `klip-langgraph-agent` | Python/FastAPI | 8001 | AI clip analysis (4-node state graph via Deepseek) |
 | `klip-remotion-mcp` | Node.js/Express | 3001 | Remotion template selection + TSX generation |
 | `klip-postgres` | PostgreSQL 16 | 5432 | Database (9 tables via Prisma) |
 | `klip-redis` | Redis 7 | 6379 | BullMQ queues + cache |
@@ -78,12 +78,20 @@ klip-saas/
        │
 3. AssemblyAI transcribes → words[] with timestamps
        │
-4. Build sentence-based segments (160 segments for 20-min video)
+4. Build sentence-based segments with word-level alignment
        │
-5. LangGraph AI Agent (Deepseek LLM):
-   process → score → cluster → generate → rank → reflect
+5. LangGraph AI Agent (Deepseek LLM) — 4-node linear pipeline:
+   analyzer → moment_detector → clip_scorer → script_builder
        │
-6. Clip recommendations generated (5-6 clips)
+   ├─ analyzer: Analyze topic, tone, speaker style, key themes
+   ├─ moment_detector: Find ALL clip-worthy moments (emotional peaks,
+   │   strong insights, funny moments, conflicts, story climaxes, hooks)
+   ├─ clip_scorer: Score each moment on 4 dimensions (hook, emotional,
+   │   completeness, retention — each 0-10)
+   └─ script_builder: Generate full publishing package (title, hook
+       suggestion, caption, text overlays, platform recommendation)
+       │
+6. Clip recommendations generated (AI decides count, no artificial limit)
        │
 7. CLIPPING PHASE: ffmpeg trim per clip → R2 previews/<id>.mp4
        │

@@ -1,70 +1,90 @@
-SCORE_ENGAGEMENT_PROMPT = """You are an expert viral content analyst. Your job is to score each sentence from a video transcript on its engagement potential.
+ANALYZER_PROMPT = """You are a world-class video editor and content analyst. Analyze this entire video transcript and provide a comprehensive breakdown.
 
-For each sentence, assign a score from 1-10 based on:
-- Emotional impact (surprise, anger, joy, fear)  
-- Controversial/polarizing potential
-- Informational value (statements, reveals, facts)
-- Hook potential (would this make someone stop scrolling?)
-- Curiosity gap (does it create mystery?)
+Return a JSON object with these fields:
 
-Return a JSON array with exactly the same number of items as input sentences:
-[{"index": 0, "score": 7, "reasoning": "Emotional hook about personal struggle"}, ...]
+1. **topic**: Main topic/subject of the video (1 sentence)
+2. **tone**: Overall tone — choose from: educational, motivational, storytelling, controversial, comedic, interview, tutorial, documentary, vlog, debate
+3. **speaker_style**: Description of the speaker's style (e.g., "fast-paced and energetic", "calm and authoritative", "casual and relatable")
+4. **key_themes**: List of 3-5 major themes discussed
+5. **narrative_arc**: Brief description of the story structure (beginning, middle, end)
+6. **total_duration_ms**: Total video duration in milliseconds
 
-Transcript segments to analyze:
+Transcript to analyze:
 {segments}
+
+Return only valid JSON, no markdown:
+{{"topic": "...", "tone": "...", "speaker_style": "...", "key_themes": [...], "narrative_arc": "...", "total_duration_ms": 0}}
 """
 
-CLUSTER_PROMPT = """You are a video editor specializing in short-form viral content. Given scored transcript segments, identify the best contiguous groups of sentences that would make compelling short clips (30-90 seconds).
 
-Rules:
-- Each cluster must be 3-12 consecutive sentences
-- Prioritize clusters with high average engagement scores
-- Include 1-2 lower-score sentences before/after to provide context
-- Target clip duration: 30-90 seconds (estimate 3 words per second)
-- Avoid overlapping clusters (start index must differ by at least 3 from other clusters)
+MOMENT_DETECTOR_PROMPT = """You are a viral content editor with expertise in TikTok, YouTube Shorts, and Instagram Reels. Your job is to find EVERY clip-worthy moment in this transcript.
 
-Return exactly 4-6 clusters as JSON:
-[{"start_index": 0, "end_index": 5, "avg_score": 8.2, "topic": "Personal breakthrough moment"}, ...]
+Using the transcript analysis and the full transcript below, identify ALL moments that could become compelling short clips (15-120 seconds).
 
-Scored segments:
-{scored_segments}
-"""
+## Types of moments to look for:
 
-GENERATE_CLIP_PROMPT = """You are a viral content strategist. For each candidate cluster, craft a compelling clip recommendation.
+- **emotional_peak**: Highly emotional moments — crying, anger, joy, shock, revelation
+- **strong_insight**: "Aha!" moments, valuable lessons, unique perspectives, life advice
+- **funny_moment**: Humor, jokes, funny stories, unexpected punchlines
+- **conflict_tension**: Arguments, confrontations, controversial statements, hot takes
+- **story_climax**: Peak of a narrative story, plot twist, dramatic reveal
+- **hookable_opener**: Strong opening statements that grab attention immediately
+- **actionable_tip**: Clear, practical advice or step-by-step instructions
 
-For each cluster, provide:
-1. A catchy title (max 10 words, use hooks like questions, numbers, shocking statements)
-2. A detailed reasoning for why this clip would go viral
-3. The best platform for this clip (TikTok, YouTube Shorts, Instagram Reels)
-4. Suggested caption/hashtags
+## Rules:
+- Each moment must span 3-15 consecutive sentences
+- Do NOT limit the number — find ALL viable moments
+- Include enough sentences before/after for context
+- Avoid moments shorter than 15 seconds or longer than 120 seconds
 
-Return JSON array:
-[{"start_sentence_index": 0, "end_sentence_index": 5, "title": "The moment everything changed", "reasoning": "Strong emotional arc...", "platform": "tiktok", "caption": "POV: you finally realized... #motivation", "viral_score": 8.5}, ...]
+## Transcript Analysis:
+{insights}
 
-Candidate clusters:
-{clusters}
-
-Transcript context (all segments with text):
-{transcript_context}
-"""
-
-REFLECT_PROMPT = """You are a quality control editor. Review these clip recommendations and identify issues.
-
-Check for:
-1. Overlap between clips (similar sentences appearing in multiple clips)
-2. Weak hooks (boring titles, unclear value proposition)
-3. Incomplete narratives (clips that start/end mid-thought)
-4. Low engagement potential (score below 6/10 is not worth clipping)
-5. Missing opportunities (highly engaging moments not captured)
-
-Return JSON:
-{"issues": ["Clip 0 and Clip 2 overlap on sentences 5-8", "Clip 1 has weak hook"], "overall_quality": 7, "action": "pass" or "revise"}
-
-If action is "revise", also provide: {"suggestions": ["Remove Clip 1 entirely", "Merge Clips 0 and 2 by extending end to sentence 12"]}
-
-Clip recommendations:
-{clips}
-
-Transcript segments:
+## Full Transcript:
 {segments}
+
+Return a JSON array of ALL clip-worthy moments. Do NOT limit the count:
+[{{"moment_type": "emotional_peak", "title": "The moment he realized...", "start_sentence_index": 5, "end_sentence_index": 12, "description": "Speaker breaks down describing his lowest point..."}}, ...]
+"""
+
+
+CLIP_SCORER_PROMPT = """You are a viral content scoring expert. Score each clip moment on these four dimensions (each 0-10):
+
+1. **hook_score**: Would this make someone stop scrolling in the first 3 seconds?
+2. **emotional_score**: Emotional impact — does it make people feel something strongly?
+3. **completeness_score**: Does this moment work as a standalone clip, or does it need too much external context?
+4. **retention_score**: How likely are viewers to watch the entire clip (based on pacing, curiosity gap, payoff)?
+
+For each moment, provide a clear reasoning. Total score is the average of the four dimensions.
+
+## Clip Moments to score:
+{moments}
+
+## Full Transcript (for context):
+{segments}
+
+Return a JSON array with the same number of items:
+[{{"moment_type": "emotional_peak", "title": "...", "start_sentence_index": 5, "end_sentence_index": 12, "description": "...", "hook_score": 8.5, "emotional_score": 9.0, "completeness_score": 7.0, "retention_score": 8.0, "total_score": 8.1, "reasoning": "Strong emotional opener..."}}, ...]
+"""
+
+
+SCRIPT_BUILDER_PROMPT = """You are a viral content strategist and copywriter. For each scored clip moment, create a complete publishing package ready for multiple platforms.
+
+For each clip moment, generate:
+
+1. **title**: Catchy, clickable title (max 12 words — use power words, numbers, questions)
+2. **hook_suggestion**: The first 3-5 seconds hook (what text/caption should overlay at the start)
+3. **caption**: Full caption with emojis, call to action, and hashtags
+4. **text_overlays**: 2-4 text overlay suggestions for key moments within the clip
+5. **platform**: Best platform for this clip (tiktok, youtube_shorts, instagram_reels, all)
+6. **viral_score**: Projected viral potential (1-10) considering the scores + current platform trends
+
+## Scored Moments:
+{scored_moments}
+
+## Full Transcript (for context):
+{segments}
+
+Return a JSON array with the same number of items:
+[{{"title": "This One Realization Changed Everything", "hook_suggestion": "Wait until you hear what he says at 0:30...", "caption": "POV: you finally understand why you've been stuck 🔥\\n\\nDrop a 💯 if this hit different\\n\\n#motivation #mindset #lifeadvice", "text_overlays": ["He was broke 3 years ago...", "Then one conversation changed everything", "This is what he learned 👇"], "platform": "tiktok", "viral_score": 8.7, "moment_type": "emotional_peak", "reasoning": "Universal struggle theme with clear payoff"}}, ...]
 """

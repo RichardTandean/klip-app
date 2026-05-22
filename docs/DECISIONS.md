@@ -18,21 +18,32 @@
 
 ## ADR-002: LangGraph (Python) as Main AI Orchestrator
 
-**Date:** 2026-05-22  
-**Status:** Accepted
+**Date:** 2026-05-22
+**Status:** Accepted (Revised 2026-05-22)
 
-**Context:** The clip analysis agent needs multi-step reasoning (transcript → score → cluster → generate → rank → reflect).
+**Context:** The clip analysis agent needs multi-step reasoning to analyze transcripts and produce ready-to-publish clip packages.
 
-**Decision:** Use LangGraph Python as a separate FastAPI microservice on port 8001.
+**Decision:** Use LangGraph Python as a separate FastAPI microservice on port 8001 with a 4-node linear pipeline:
+
+```
+analyzer → moment_detector → clip_scorer → script_builder
+```
 
 **Rationale:**
 - LangGraph JS is less mature than Python — Python version has checkpointing, streaming, and tool calling all stable
-- State machine model maps directly to our clip analysis workflow
+- State machine model maps directly to our clip analysis workflow (each node enriches the state)
+- Linear flow with no artificial limits — AI decides how many clips to generate based on content density
 - Separate service allows independent scaling and deployment
-- Deepseek API works via OpenAI-compatible client, well-supported in LangChain Python
+- Deepseek API works via LangChain's `ChatDeepSeek` integration
+
+**Pipeline Nodes:**
+1. **analyzer** — Analyze full transcript: topic, tone, speaker style, key themes, narrative arc
+2. **moment_detector** — Detect ALL clip-worthy moments (emotional_peak, strong_insight, funny_moment, conflict_tension, story_climax, hookable_opener, actionable_tip)
+3. **clip_scorer** — Score each moment on 4 dimensions: hook, emotional, completeness, retention (0-10 each)
+4. **script_builder** — Generate publishing package: title, hook suggestion, caption, text overlays, platform recommendation, viral score
 
 **Alternatives Considered:**
-- Vercel AI SDK — good for simple calls but lacks state machine and reflection loops
+- Vercel AI SDK — good for simple calls but lacks state machine
 - Custom tool-calling loop — too much boilerplate
 - LangGraph JS — less mature, Python has better docs and community
 
@@ -172,10 +183,6 @@ AI Analysis → create Clip records (status: CLIPPING)
 - Aligns with user's mental model: "segment 30-37" = sentences 30 through 37
 - AssemblyAI's `punctuate: true` provides reliable punctuation for sentence boundary detection
 - Fallback to 30-word chunks if sentence parsing fails
-
-**LangGraph Adaptation:**
-- `process_transcript` node simplified — no more word-count merging, just filters empty/short text
-- Each sentence passes through the scoring → clustering → generating pipeline individually
-- Clip boundaries map directly to sentence indices (more precise than word-count boundaries)
+- Segment indices are preserved through the entire AI pipeline via dict lookup (`seg_by_index`)
 
 

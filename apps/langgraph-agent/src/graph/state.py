@@ -1,4 +1,4 @@
-from typing import TypedDict, NotRequired
+from typing import TypedDict
 
 
 class Segment(TypedDict):
@@ -8,38 +8,47 @@ class Segment(TypedDict):
     end_ms: int
 
 
-class ScoredSegment(Segment):
-    engagement_score: float
+class ClipMoment(TypedDict):
+    title: str
+    moment_type: str
+    start_sentence_index: int
+    end_sentence_index: int
+    start_ms: int
+    end_ms: int
+    description: str
+
+
+class ScoredMoment(ClipMoment):
+    hook_score: float
+    emotional_score: float
+    completeness_score: float
+    retention_score: float
+    total_score: float
     reasoning: str
 
 
-class Cluster(TypedDict):
-    start_index: int
-    end_index: int
-    duration_ms: int
-    avg_score: float
-
-
-class ClipRecommendation(TypedDict):
+class ClipScript(TypedDict):
     title: str
     start_sentence_index: int
     end_sentence_index: int
     start_ms: int
     end_ms: int
     duration_ms: int
-    reasoning: str
+    hook_suggestion: str
+    caption: str
+    text_overlays: list[str]
+    platform: str
     viral_score: float
-    platform: NotRequired[str]
-    caption: NotRequired[str]
+    moment_type: str
+    reasoning: str
 
 
 class ClipAnalysisState(TypedDict):
     project_id: str
     transcript_segments: list[Segment]
-    cleaned_segments: list[Segment]
-    scored_segments: list[ScoredSegment]
-    candidate_clusters: list[Cluster]
-    clip_recommendations: list[ClipRecommendation]
-    reflection_count: int
+    insights: dict
+    clip_moments: list[ClipMoment]
+    scored_moments: list[ScoredMoment]
+    clip_scripts: list[ClipScript]
     status: str
     error: str | None
