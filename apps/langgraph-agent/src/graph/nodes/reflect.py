@@ -26,7 +26,7 @@ def reflect(state: ClipAnalysisState) -> ClipAnalysisState:
         {"index": s["index"], "text": s["text"]} for s in segments
     ], indent=2)
 
-    prompt = REFLECT_PROMPT.format(clips=clips_json, segments=segments_json)
+    prompt = REFLECT_PROMPT.replace('{clips}', clips_json).replace('{segments}', segments_json)
 
     llm = get_llm(temperature=0.2)
     response = llm.invoke(prompt)

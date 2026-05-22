@@ -39,7 +39,7 @@ For each cluster, provide:
 4. Suggested caption/hashtags
 
 Return JSON array:
-[{""start_sentence_index": 0, "end_sentence_index": 5, "title": "The moment everything changed", "reasoning": "Strong emotional arc...", "platform": "tiktok", "caption": "POV: you finally realized... #motivation", "viral_score": 8.5}, ...]
+[{"start_sentence_index": 0, "end_sentence_index": 5, "title": "The moment everything changed", "reasoning": "Strong emotional arc...", "platform": "tiktok", "caption": "POV: you finally realized... #motivation", "viral_score": 8.5}, ...]
 
 Candidate clusters:
 {clusters}
@@ -58,9 +58,9 @@ Check for:
 5. Missing opportunities (highly engaging moments not captured)
 
 Return JSON:
-{""issues": ["Clip 0 and Clip 2 overlap on sentences 5-8", "Clip 1 has weak hook"], "overall_quality": 7, "action": "pass" or "revise"}
+{"issues": ["Clip 0 and Clip 2 overlap on sentences 5-8", "Clip 1 has weak hook"], "overall_quality": 7, "action": "pass" or "revise"}
 
-If action is "revise", also provide: {""suggestions": ["Remove Clip 1 entirely", "Merge Clips 0 and 2 by extending end to sentence 12"]}
+If action is "revise", also provide: {"suggestions": ["Remove Clip 1 entirely", "Merge Clips 0 and 2 by extending end to sentence 12"]}
 
 Clip recommendations:
 {clips}

@@ -2,6 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue, Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Job, Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
+const execFileAsync = promisify(execFile);
 
 interface AssemblyAIUtterance {
   confidence: number;
@@ -16,6 +24,7 @@ interface AssemblyAIResult {
   status: string;
   text: string;
   utterances: AssemblyAIUtterance[];
+  words: { text: string; start: number; end: number; confidence: number }[];
 }
 
 @Injectable()
@@ -27,14 +36,15 @@ export class TranscriptProcessor extends WorkerHost {
 
   constructor(
     private prisma: PrismaService,
+    private storage: StorageService,
     @InjectQueue('clip-analysis') private clipAnalysisQueue: Queue,
   ) {
     super();
     this.apiKey = process.env.ASSEMBLYAI_API_KEY || '';
   }
 
-  async process(job: Job<{ projectId: string; videoId: string; r2Url: string }>): Promise<any> {
-    const { projectId, videoId, r2Url } = job.data;
+  async process(job: Job<{ projectId: string; videoId: string; r2Url: string; r2Key: string }>): Promise<any> {
+    const { projectId, videoId, r2Key } = job.data;
 
     this.logger.log(`Starting transcription for video ${videoId}`);
 
@@ -43,7 +53,11 @@ export class TranscriptProcessor extends WorkerHost {
       data: { status: 'TRANSCRIBING' },
     });
 
-    const transcriptId = await this.submitTranscription(r2Url);
+    const signedUrl = await this.storage.getSignedUrl(r2Key, 7200);
+
+    this.logger.log(`Signed URL ready, submitting to AssemblyAI`);
+
+    const transcriptId = await this.submitTranscription(signedUrl);
     const result = await this.pollTranscription(transcriptId);
 
     if (result.status !== 'completed') {
@@ -58,13 +72,7 @@ export class TranscriptProcessor extends WorkerHost {
       },
     });
 
-    const segments = (result.utterances || []).map((u, index) => ({
-      transcriptId: transcript.id,
-      index,
-      text: u.text.trim(),
-      startMs: Math.round(u.start),
-      endMs: Math.round(u.end),
-    }));
+    const segments = this.buildSegments(transcript.id, result);
 
     if (segments.length > 0) {
       await this.prisma.transcriptSegment.createMany({ data: segments });
@@ -84,6 +92,40 @@ export class TranscriptProcessor extends WorkerHost {
       transcriptId: transcript.id,
       segmentCount: segments.length,
     };
+  }
+
+  private async extractAndUploadAudio(videoId: string, signedVideoUrl: string): Promise<string> {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'klip_audio_'));
+    const audioFile = path.join(tmpDir, `${videoId}.mp3`);
+
+    try {
+      this.logger.log(`Extracting audio from video ${videoId}`);
+
+      await execFileAsync('ffmpeg', [
+        '-y',
+        '-i', signedVideoUrl,
+        '-vn',
+        '-acodec', 'libmp3lame',
+        '-ar', '44100',
+        '-ac', '2',
+        '-b:a', '128k',
+        audioFile,
+      ], { timeout: 300000 });
+
+      this.logger.log(`Audio extracted, uploading to R2`);
+
+      const audioKey = this.storage.generateKey('audio', `${videoId}.mp3`);
+      const audioBuffer = await fs.readFile(audioFile);
+      await this.storage.upload(audioFile, audioKey, 'audio/mpeg');
+
+      const signedAudioUrl = await this.storage.getSignedUrl(audioKey, 7200);
+
+      this.logger.log(`Audio uploaded, signed URL ready`);
+
+      return signedAudioUrl;
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 
   private async submitTranscription(audioUrl: string): Promise<string> {
@@ -133,6 +175,121 @@ export class TranscriptProcessor extends WorkerHost {
     }
 
     throw new Error('Transcription polling timeout');
+  }
+
+  private buildSegments(transcriptId: string, result: AssemblyAIResult) {
+    if (result.utterances && result.utterances.length > 0) {
+      return result.utterances.map((u, index) => ({
+        transcriptId,
+        index,
+        text: u.text.trim(),
+        startMs: Math.round(u.start),
+        endMs: Math.round(u.end),
+      }));
+    }
+
+    if (result.words && result.words.length > 0) {
+      return this.buildSentenceSegments(transcriptId, result.words);
+    }
+
+    return [];
+  }
+
+  private buildSentenceSegments(
+    transcriptId: string,
+    words: { text: string; start: number; end: number; confidence: number }[],
+  ) {
+    const fullText = words.map((w) => w.text).join(' ');
+    const sentenceBoundaries = this.findSentenceBoundaries(fullText);
+
+    if (sentenceBoundaries.length === 0) {
+      return this.buildChunkSegments(transcriptId, words, 30);
+    }
+
+    const segments: { transcriptId: string; index: number; text: string; startMs: number; endMs: number }[] = [];
+
+    let wordCursor = 0;
+    for (const sentence of sentenceBoundaries) {
+      const sentenceWords: typeof words = [];
+      let charPos = 0;
+
+      for (let i = wordCursor; i < words.length; i++) {
+        const w = words[i];
+        const expectedText = sentence.slice(charPos).trimStart();
+
+        if (expectedText.startsWith(w.text)) {
+          sentenceWords.push(w);
+          charPos = sentence.indexOf(w.text, charPos) + w.text.length;
+          wordCursor = i + 1;
+        }
+      }
+
+      if (sentenceWords.length > 0) {
+        segments.push({
+          transcriptId,
+          index: segments.length,
+          text: sentenceWords.map((w) => w.text).join(' '),
+          startMs: Math.round(sentenceWords[0].start),
+          endMs: Math.round(sentenceWords[sentenceWords.length - 1].end),
+        });
+      }
+    }
+
+    if (segments.length === 0) {
+      return this.buildChunkSegments(transcriptId, words, 30);
+    }
+
+    return segments;
+  }
+
+  private findSentenceBoundaries(text: string): string[] {
+    const sentences: string[] = [];
+    let current = '';
+    let i = 0;
+
+    while (i < text.length) {
+      const ch = text[i];
+
+      if ((ch === '.' || ch === '?' || ch === '!') && (i + 1 >= text.length || text[i + 1] === ' ' || text[i + 1] === '\n')) {
+        current += ch;
+        const trimmed = current.trim();
+        if (trimmed.length > 0) {
+          sentences.push(trimmed);
+        }
+        current = '';
+        i += 2;
+        continue;
+      }
+
+      current += ch;
+      i++;
+    }
+
+    const trimmed = current.trim();
+    if (trimmed.length > 0) {
+      sentences.push(trimmed);
+    }
+
+    return sentences;
+  }
+
+  private buildChunkSegments(
+    transcriptId: string,
+    words: { text: string; start: number; end: number; confidence: number }[],
+    wordsPerChunk: number,
+  ) {
+    const segments: { transcriptId: string; index: number; text: string; startMs: number; endMs: number }[] = [];
+    for (let i = 0; i < words.length; i += wordsPerChunk) {
+      const chunk = words.slice(i, i + wordsPerChunk);
+      segments.push({
+        transcriptId,
+        index: segments.length,
+        text: chunk.map((w) => w.text).join(' ').trim(),
+        startMs: Math.round(chunk[0].start),
+        endMs: Math.round(chunk[chunk.length - 1].end),
+      });
+    }
+    return segments;
   }
 
   private delay(ms: number): Promise<void> {

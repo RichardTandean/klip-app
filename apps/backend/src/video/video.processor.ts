@@ -43,6 +43,7 @@ export class VideoProcessor extends WorkerHost {
         projectId,
         videoId: existing.id,
         r2Url: existing.r2Url,
+        r2Key: existing.r2Key,
       });
 
       return { status: 'deduplicated', videoId: existing.id };
@@ -54,20 +55,19 @@ export class VideoProcessor extends WorkerHost {
     });
 
     const tmpDir = os.tmpdir();
-    const outputTemplate = path.join(tmpDir, `klip_${projectId}_%(id)s.%(ext)s`);
+    const videoId = extractVideoId(youtubeUrl);
+    const outputFile = path.join(tmpDir, `klip_${projectId}_${videoId}.mp4`);
 
     try {
-      const { stdout } = await execFileAsync('yt-dlp', [
+      await execFileAsync('yt-dlp', [
         '--no-playlist',
         '--format', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
         '--merge-output-format', 'mp4',
-        '--output', outputTemplate,
-        '--print', '%(id)s',
+        '--output', outputFile,
         youtubeUrl,
       ], { timeout: 600000 });
 
-      const videoId = stdout.trim();
-      const localFile = path.join(tmpDir, `klip_${projectId}_${videoId}.mp4`);
+      const localFile = outputFile;
 
       const r2Key = this.storage.generateKey('videos', `${videoId}.mp4`);
       const r2Url = await this.storage.upload(localFile, r2Key, 'video/mp4');
@@ -93,6 +93,7 @@ export class VideoProcessor extends WorkerHost {
         projectId,
         videoId: video.id,
         r2Url,
+        r2Key,
       });
 
       await this.prisma.video.update({
@@ -123,4 +124,16 @@ export class VideoProcessor extends WorkerHost {
   onFailed(job: Job, error: Error) {
     this.logger.error(`Download failed: ${job.data.projectId}`, error.message);
   }
+}
+
+function extractVideoId(url: string): string {
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
+    /(?:youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+  ];
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return url.split('/').pop()?.split('?')[0] || String(Date.now());
 }

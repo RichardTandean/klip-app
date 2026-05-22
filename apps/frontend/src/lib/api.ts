@@ -43,7 +43,10 @@ export async function api<T = unknown>(
       return retry.json();
     }
     if (typeof window !== 'undefined') {
-      window.location.href = '/login';
+      const { pathname } = window.location;
+      if (pathname !== '/login' && pathname !== '/register') {
+        window.location.href = '/login';
+      }
     }
     throw new Error('Unauthorized');
   }

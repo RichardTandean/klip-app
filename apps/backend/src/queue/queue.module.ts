@@ -19,6 +19,7 @@ import { BullModule } from '@nestjs/bullmq';
       { name: 'youtube-download' },
       { name: 'video-transcribe' },
       { name: 'clip-analysis' },
+      { name: 'clip-preview' },
       { name: 'motion-generate' },
       { name: 'video-export' },
     ),

@@ -16,6 +16,8 @@ import { ClipModule } from './clip/clip.module';
 import { EditModule } from './edit/edit.module';
 import { MotionModule } from './motion/motion.module';
 import { ExportModule } from './export/export.module';
+import { ClipPreviewModule } from './clip-preview/clip-preview.module';
+import { StreamModule } from './stream/stream.module';
 
 @Module({
   imports: [
@@ -36,6 +38,8 @@ import { ExportModule } from './export/export.module';
     EditModule,
     MotionModule,
     ExportModule,
+    ClipPreviewModule,
+    StreamModule,
   ],
   controllers: [AppController],
   providers: [

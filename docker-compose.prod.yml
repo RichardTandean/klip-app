@@ -1,0 +1,156 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: klip-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: klip
+      POSTGRES_PASSWORD: 4a45d7c96eab9393b9dded752402f1c2
+      POSTGRES_DB: klip
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U klip -d klip"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - klip-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  redis:
+    image: redis:7-alpine
+    container_name: klip-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - klip-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  langgraph-agent:
+    build:
+      context: ./apps/langgraph-agent
+      dockerfile: Dockerfile
+    container_name: klip-langgraph-agent
+    restart: unless-stopped
+    environment:
+      DEEPSEEK_API_KEY: sk-a877503c4fed4f7f9d17918432c0c4f6
+      DEEPSEEK_BASE_URL: https://api.deepseek.com
+      DEEPSEEK_MODEL: deepseek-chat
+    networks:
+      - klip-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    container_name: klip-backend
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - temp_data:/tmp/klip
+    networks:
+      - klip-network
+      - remotion-service
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: https://klip.richardtandean.my.id/api
+        NEXT_PUBLIC_WS_URL: https://klip.richardtandean.my.id
+    container_name: klip-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - klip-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  remotion-mcp:
+    build:
+      context: .
+      dockerfile: packages/remotion-mcp/Dockerfile
+    container_name: klip-remotion-mcp
+    restart: unless-stopped
+    environment:
+      RENDER_URL: http://remotion-renderer:8080
+      PORT: "3001"
+    networks:
+      - klip-network
+      - remotion-service
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+networks:
+  klip-network:
+    external: true
+    name: klip-network
+  remotion-service:
+    external: true
+    name: remotion-service
+
+volumes:
+  postgres_data:
+    name: klip-postgres-data
+  redis_data:
+    name: klip-redis-data
+  temp_data:
+    name: klip-temp-data

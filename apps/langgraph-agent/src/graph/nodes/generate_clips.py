@@ -11,10 +11,7 @@ def generate_clips(state: ClipAnalysisState) -> ClipAnalysisState:
     clusters_json = json.dumps(clusters, indent=2)
     transcript_context = json.dumps([{"index": s["index"], "text": s["text"]} for s in cleaned], indent=2)
 
-    prompt = GENERATE_CLIP_PROMPT.format(
-        clusters=clusters_json,
-        transcript_context=transcript_context,
-    )
+    prompt = GENERATE_CLIP_PROMPT.replace('{clusters}', clusters_json).replace('{transcript_context}', transcript_context)
 
     llm = get_llm(temperature=0.6)
     response = llm.invoke(prompt)

@@ -8,7 +8,7 @@ import {
   useCallback,
   type ReactNode,
 } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { authApi } from '@/lib/api';
 
 interface User {
@@ -31,8 +31,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
+    if (pathname === '/login' || pathname === '/register') {
+      setIsLoading(false);
+      return;
+    }
+
     let cancelled = false;
     authApi
       .me()
@@ -52,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [pathname]);
 
   const login = useCallback(
     async (email: string, password: string) => {

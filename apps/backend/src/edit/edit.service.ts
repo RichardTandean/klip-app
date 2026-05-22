@@ -22,7 +22,7 @@ export class EditService {
       where: { clipId, userId },
     });
 
-    if (existing) return existing;
+    if (existing) return this.findOne(userId, existing.id);
 
     const edit = await this.prisma.edit.create({
       data: { clipId, projectId: clip.projectId, userId },
@@ -42,7 +42,7 @@ export class EditService {
         await this.prisma.editSegment.createMany({
           data: relevantSegments.map((s, i) => ({
             editId: edit.id,
-            segmentIndex: i,
+            segmentIndex: s.index,
             type: 'original',
           })),
         });
@@ -73,6 +73,7 @@ export class EditService {
 
     const video = edit.clip.project.videos[0];
     let signedUrl: string | null = null;
+    let clipPreviewUrl: string | null = null;
 
     if (video?.r2Key) {
       try {
@@ -80,11 +81,15 @@ export class EditService {
       } catch {
         signedUrl = video.r2Url;
       }
+      try {
+        clipPreviewUrl = await this.storage.getSignedUrl(`previews/${edit.clip.id}.mp4`, 7200);
+      } catch {}
     }
 
     return {
       ...edit,
       signedUrl,
+      clipPreviewUrl,
       video,
     };
   }

@@ -23,7 +23,7 @@ def cluster_sentences(state: ClipAnalysisState) -> ClipAnalysisState:
         indent=2,
     )
 
-    prompt = CLUSTER_PROMPT.format(scored_segments=scored_json)
+    prompt = CLUSTER_PROMPT.replace('{scored_segments}', scored_json)
 
     llm = get_llm(temperature=0.4)
     response = llm.invoke(prompt)

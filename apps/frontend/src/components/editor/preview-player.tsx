@@ -13,7 +13,7 @@ export function PreviewPlayer({ src }: PreviewPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<ReturnType<typeof videojs> | null>(null);
-  const { setCurrentTime, setIsPlaying } = useEditorStore();
+  const { setCurrentTime, setIsPlaying, seekTo, clearSeek } = useEditorStore();
 
   useEffect(() => {
     if (!videoRef.current || !src) return;
@@ -39,6 +39,14 @@ export function PreviewPlayer({ src }: PreviewPlayerProps) {
       playerRef.current = null;
     };
   }, [src, setCurrentTime, setIsPlaying]);
+
+  useEffect(() => {
+    if (seekTo !== null && playerRef.current) {
+      playerRef.current.currentTime(seekTo);
+      playerRef.current.play();
+      clearSeek();
+    }
+  }, [seekTo, clearSeek]);
 
   return (
     <div ref={containerRef} className="rounded-lg overflow-hidden bg-black">

@@ -17,7 +17,7 @@ def score_engagement(state: ClipAnalysisState) -> ClipAnalysisState:
         return state
 
     segments_text = json.dumps(segments, indent=2)
-    prompt = SCORE_ENGAGEMENT_PROMPT.format(segments=segments_text)
+    prompt = SCORE_ENGAGEMENT_PROMPT.replace('{segments}', segments_text)
 
     llm = get_llm(temperature=0.3)
     response = llm.invoke(prompt)

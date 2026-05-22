@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/auth-provider';
 import { useCreateEdit, useEdit, useUpdateSegment } from '@/hooks/use-edit';
-import { useGenerateMotion } from '@/hooks/use-motion';
 import { useTranscript } from '@/hooks/use-projects';
 import { useEditorStore } from '@/stores/editor-store';
 import { Navbar } from '@/components/navbar';
@@ -12,6 +11,13 @@ import { PreviewPlayer } from '@/components/editor/preview-player';
 import { Timeline } from '@/components/editor/timeline';
 import { SegmentInspector } from '@/components/editor/segment-inspector';
 import { ExportToolbar } from '@/components/editor/export-toolbar';
+
+function formatTimestamp(ms: number) {
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${sec.toString().padStart(2, '0')}.${Math.floor((ms % 1000) / 100)}`;
+}
 
 export default function EditorPage() {
   const params = useParams();
@@ -23,9 +29,8 @@ export default function EditorPage() {
   const router = useRouter();
 
   const createEdit = useCreateEdit();
-  const updateSegment = useUpdateSegment('');
 
-  const { selectedSegmentIndex } = useEditorStore();
+  const { selectedSegmentIndex, selectSegment, triggerSeek } = useEditorStore();
 
   const editId = createEdit.data?.id || '';
 
@@ -43,7 +48,35 @@ export default function EditorPage() {
   const { data: transcript } = useTranscript(projectId);
 
   const updateSegmentMutation = useUpdateSegment(editId);
-  const generateMotion = useGenerateMotion();
+
+  const clipStartMs = edit?.clip?.startMs || 0;
+
+  const clipSegments = useMemo(() => {
+    if (!transcript?.segments || !edit?.clip) return [];
+
+    const { startSegmentIndex, endSegmentIndex } = edit.clip;
+
+    return transcript.segments
+      .filter((seg) => seg.index >= startSegmentIndex && seg.index <= endSegmentIndex)
+      .map((seg) => {
+        const segOverride = edit.segments.find((es) => es.segmentIndex === seg.index);
+        return {
+          ...seg,
+          type: segOverride?.type || 'original',
+          brollUrl: segOverride?.brollUrl,
+          brollPrompt: segOverride?.brollPrompt,
+          relativeStartMs: seg.startMs - clipStartMs,
+          relativeEndMs: seg.endMs - clipStartMs,
+        };
+      });
+  }, [transcript, edit, clipStartMs]);
+
+  const totalDurationMs = useMemo(() => {
+    if (clipSegments.length === 0) return 60000;
+    return clipSegments[clipSegments.length - 1].relativeEndMs;
+  }, [clipSegments]);
+
+  const selectedSegment = clipSegments.find((s) => s.index === selectedSegmentIndex) || null;
 
   const handleApplyBroll = useCallback(
     (segmentIndex: number, type: string, url?: string, prompt?: string) => {
@@ -57,24 +90,6 @@ export default function EditorPage() {
     [updateSegmentMutation, editId],
   );
 
-  const handleGenerateBroll = useCallback(
-    (segmentIndex: number, prompt: string) => {
-      generateMotion.mutate(
-        { prompt, durationMs: 5000 },
-        {
-          onSuccess: (data) => {
-            updateSegmentMutation.mutate({
-              segmentIndex,
-              type: 'broll_generated',
-              brollPrompt: prompt,
-            });
-          },
-        },
-      );
-    },
-    [generateMotion, updateSegmentMutation, editId],
-  );
-
   const handleReset = useCallback(
     (segmentIndex: number) => {
       updateSegmentMutation.mutate({ segmentIndex, type: 'original' });
@@ -82,12 +97,19 @@ export default function EditorPage() {
     [updateSegmentMutation, editId],
   );
 
-  const handleExport = useCallback(
-    (format: { aspectRatio: string; resolution: string; quality: string }) => {
-      // Phase 8: trigger export
-      console.log('Export:', format);
+  const handleDeleteSegment = useCallback(
+    (segmentIndex: number) => {
+      updateSegmentMutation.mutate({ segmentIndex, type: 'broll_upload' });
     },
-    [],
+    [updateSegmentMutation, editId],
+  );
+
+  const handleSelectSegment = useCallback(
+    (index: number, relativeStartMs: number) => {
+      selectSegment(index);
+      triggerSeek(relativeStartMs / 1000);
+    },
+    [selectSegment, triggerSeek],
   );
 
   if (authLoading || !user) {
@@ -121,43 +143,55 @@ export default function EditorPage() {
     );
   }
 
-  const segments = (transcript?.segments || []).map((seg) => {
-    const segOverride = edit.segments.find((es) => es.segmentIndex === seg.index);
-    return {
-      ...seg,
-      type: segOverride?.type || 'original',
-      brollUrl: segOverride?.brollUrl,
-      brollPrompt: segOverride?.brollPrompt,
-    };
-  });
-
-  const totalDurationMs = segments.length > 0
-    ? segments[segments.length - 1].endMs - segments[0].startMs
-    : 60000;
-
-  const selectedSegment = segments.find((s) => s.index === selectedSegmentIndex) || null;
-
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-background">
       <Navbar />
-      <div className="flex items-center justify-between px-6 py-2 border-b">
-        <div>
-          <span className="text-sm font-medium">{edit.clip?.title || 'Editor'}</span>
+
+      <div className="flex items-center justify-between px-6 py-2 border-b bg-muted/30">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold">{edit.clip?.title || 'Editor'}</span>
+          <span className="text-xs text-muted-foreground">
+            {clipSegments.length} segments · {formatTimestamp(totalDurationMs)}
+          </span>
         </div>
         <ExportToolbar editId={editId} />
       </div>
 
-      <div className="flex-1 flex">
+      <div className="flex-1 flex min-h-0">
         <div className="flex-1 flex flex-col p-4 gap-3 min-w-0">
-          <PreviewPlayer src={edit.signedUrl} />
-          <Timeline segments={segments} totalDurationMs={totalDurationMs} />
+          <PreviewPlayer src={`/api/stream/clip/${clipId}`} />
+
+          <Timeline
+            segments={clipSegments.map((s) => ({
+              index: s.index,
+              text: s.text,
+              type: s.type,
+              startMs: s.relativeStartMs,
+              endMs: s.relativeEndMs,
+            }))}
+            totalDurationMs={totalDurationMs}
+            onSelectSegment={handleSelectSegment}
+            onDeleteSegment={handleDeleteSegment}
+          />
         </div>
 
-        <div className="w-80 shrink-0 border-l p-4">
+        <div className="w-80 shrink-0 border-l bg-muted/10">
           <SegmentInspector
-            segment={selectedSegment}
+            segment={
+              selectedSegment
+                ? {
+                    index: selectedSegment.index,
+                    text: selectedSegment.text,
+                    startMs: selectedSegment.relativeStartMs,
+                    endMs: selectedSegment.relativeEndMs,
+                    type: selectedSegment.type,
+                    brollUrl: selectedSegment.brollUrl,
+                    brollPrompt: selectedSegment.brollPrompt,
+                  }
+                : null
+            }
             onApplyBroll={handleApplyBroll}
-            onGenerateBroll={handleGenerateBroll}
+            onDeleteSegment={handleDeleteSegment}
             onReset={handleReset}
           />
         </div>

@@ -132,3 +132,15 @@ export function useAnalyzeClips(projectId: string) {
     },
   });
 }
+
+export function useClipPreview(projectId: string, clipId: string) {
+  return useQuery({
+    queryKey: ['projects', projectId, 'clips', clipId, 'preview'],
+    queryFn: () =>
+      api<{ previewUrl: string; durationMs: number; clipTitle: string }>(
+        `/projects/${projectId}/clips/${clipId}/preview`,
+      ),
+    enabled: !!projectId && !!clipId,
+    staleTime: 300000,
+  });
+}

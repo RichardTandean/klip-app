@@ -104,3 +104,78 @@
 - Can migrate to Clerk/Auth0 later without breaking data model
 
 **Future Consideration:** Clerk for social login, MFA, and session management at scale.
+
+---
+
+## ADR-007: Buffer-Based Stream Proxy for Video Playback
+
+**Date:** 2026-05-22
+**Status:** Accepted
+
+**Context:** Video.js player in the editor needs to play trimmed clip videos stored in R2. Signed URLs via `@aws-sdk/s3-request-presigner` returned 403 from Cloudflare R2 (signature format incompatibility). Piping S3 `GetObject` responses through NestJS to the browser caused unreliable streaming (499 client disconnects, range request failures).
+
+**Decision:** Stream videos via a proxy endpoint (`GET /api/stream/clip/:id`) that reads the entire file from R2 into a buffer, then sends it with proper range-request support via `res.end(buffer)`.
+
+**Rationale:**
+- Clip videos are small (5-10 MB after trimming) — buffering is fast and safe
+- Buffer-based approach avoids pipe complexity (no backpressure, no stream errors)
+- Range requests handled via `Buffer.slice()` — Chrome/Video.js send `Range: bytes=0-xxxx` to probe format before full download
+- No CORS issues (same-origin proxy)
+- No auth needed (clip ID is the access token — public endpoint)
+- R2 `GetObject` works reliably via S3 client (unlike presigned URLs)
+
+**Alternatives Considered:**
+- Presigned R2 URLs — returned 403, `forcePathStyle: true` didn't fully resolve
+- S3 pipe streaming — caused 499 client disconnects and range request failures
+- Cloudflare Stream / Mux — unnecessary managed service cost for MVP
+
+---
+
+## ADR-008: Synchronous Clipping Phase After AI Analysis
+
+**Date:** 2026-05-22
+**Status:** Accepted
+
+**Context:** After AI analysis generates clip recommendations (title, startMs, endMs, viral score), the trimmed video files must exist before the user opens the editing dashboard. Previously this was async via BullMQ queue, causing clips to appear before their preview videos were ready.
+
+**Decision:** Add a **clipping phase** within the `clip-analysis` job that synchronously trims each clip via ffmpeg and uploads to R2 before setting the project status to `READY`.
+
+**Rationale:**
+- Guarantees clips are playable immediately when user opens the project
+- Avoids race condition: user clicks clip → preview not yet generated → video error
+- ffmpeg trimming with `-c copy` (no re-encode) is fast (~1-2 seconds per clip)
+- `PREVIEWS` R2 path: `previews/<clipId>.mp4` — same key used by stream proxy and ClipCard hover
+- Clip status goes: `CLIPPING` → `READY` (individual), Project: `CLIPPING` → `READY`
+- Clips that fail to trim are marked `FAILED` but project still completes
+
+**Flow:**
+```
+AI Analysis → create Clip records (status: CLIPPING)
+  → for each clip: ffmpeg trim → R2 upload → status: READY
+  → Project status: READY
+```
+
+---
+
+## ADR-009: Sentence-Based Segmentation via AssemblyAI Word-Level Data
+
+**Date:** 2026-05-22
+**Status:** Accepted
+
+**Context:** AssemblyAI returns word-level timestamps (`words[]`) and optional speaker turns (`utterances[]`). For single-speaker videos (most YouTube content), `utterances` is null. The initial approach grouped 30 words per segment, producing arbitrary boundaries that didn't align with natural sentence breaks.
+
+**Decision:** Split transcript text by sentence endings (`.`, `?`, `!`) using the full punctuated text, then align each sentence with its constituent words to derive segment timestamps.
+
+**Rationale:**
+- Sentence = natural unit for clip editing (each sentence is one thought/topic)
+- 160 segments from 1744 words = ~11 words per segment (vs 30-word chunks)
+- Aligns with user's mental model: "segment 30-37" = sentences 30 through 37
+- AssemblyAI's `punctuate: true` provides reliable punctuation for sentence boundary detection
+- Fallback to 30-word chunks if sentence parsing fails
+
+**LangGraph Adaptation:**
+- `process_transcript` node simplified — no more word-count merging, just filters empty/short text
+- Each sentence passes through the scoring → clustering → generating pipeline individually
+- Clip boundaries map directly to sentence indices (more precise than word-count boundaries)
+
+

@@ -20,6 +20,7 @@ export interface EditData {
   userId: string;
   status: string;
   signedUrl: string | null;
+  clipPreviewUrl: string | null;
   video: {
     id: string;
     r2Url: string;
@@ -31,6 +32,8 @@ export interface EditData {
     startMs: number;
     endMs: number;
     durationMs: number;
+    startSegmentIndex: number;
+    endSegmentIndex: number;
   };
   segments: EditSegment[];
   r2Url?: string | null;

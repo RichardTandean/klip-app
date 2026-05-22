@@ -17,9 +17,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+import os
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "https://klip.richardtandean.my.id",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

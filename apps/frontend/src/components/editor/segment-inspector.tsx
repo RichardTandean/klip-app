@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useEditorStore } from '@/stores/editor-store';
+import { useState, useRef, useEffect } from 'react';
+import { useGenerateMotion } from '@/hooks/use-motion';
 
 interface Segment {
   index: number;
@@ -13,27 +13,56 @@ interface Segment {
   brollPrompt?: string | null;
 }
 
+interface ChatMessage {
+  role: 'user' | 'ai';
+  content: string;
+  templateId?: string;
+  templateName?: string;
+  previewUrl?: string;
+  previewLoaded?: boolean;
+}
+
 interface SegmentInspectorProps {
   segment: Segment | null;
   onApplyBroll: (index: number, type: string, url?: string, prompt?: string) => void;
-  onGenerateBroll: (index: number, prompt: string) => void;
+  onDeleteSegment: (index: number) => void;
   onReset: (index: number) => void;
 }
+
+const QUICK_PROMPTS = [
+  { icon: '💥', label: 'Explosion effect', prompt: 'explosion burst effect' },
+  { icon: '📝', label: 'Lower third title', prompt: 'lower third with title text' },
+  { icon: '✨', label: 'Kinetic text reveal', prompt: 'kinetic text animation reveal' },
+  { icon: '🔍', label: 'Spotlight highlight', prompt: 'spotlight highlight reveal' },
+];
 
 export function SegmentInspector({
   segment,
   onApplyBroll,
-  onGenerateBroll,
+  onDeleteSegment,
   onReset,
 }: SegmentInspectorProps) {
-  const [brollUrl, setBrollUrl] = useState('');
-  const [brollPrompt, setBrollPrompt] = useState('');
-  const [tab, setTab] = useState<'upload' | 'generate'>('upload');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const generateMotion = useGenerateMotion();
+
+  useEffect(() => {
+    if (segment) {
+      setMessages([]);
+      setInput('');
+    }
+  }, [segment?.index]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   if (!segment) {
     return (
-      <div className="rounded-lg border p-6 min-h-[200px] flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">Select a segment to edit</p>
+      <div className="rounded-lg border p-6 min-h-[300px] flex items-center justify-center">
+        <p className="text-sm text-muted-foreground">Select a segment in the timeline to edit</p>
       </div>
     );
   }
@@ -44,95 +73,166 @@ export function SegmentInspector({
     broll_generated: 'AI Generated B-roll',
   };
 
+  const handleSend = async () => {
+    const prompt = input.trim();
+    if (!prompt || isGenerating) return;
+
+    setMessages((prev) => [...prev, { role: 'user', content: prompt }]);
+    setInput('');
+    setIsGenerating(true);
+
+    try {
+      const safePrompt = prompt.slice(0, 200);
+      const result = await generateMotion.mutateAsync({
+        prompt: safePrompt,
+        durationMs: segment.endMs - segment.startMs,
+        style: 'dark',
+      });
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'ai',
+          content: `Generated b-roll video with prompt: "${safePrompt}"`,
+          previewUrl: undefined,
+        },
+      ]);
+
+      onApplyBroll(segment.index, 'broll_generated', undefined, safePrompt);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { role: 'ai', content: 'Failed to generate b-roll. Please try again.' },
+      ]);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleQuickPrompt = (prompt: string) => {
+    setInput(prompt);
+  };
+
   return (
-    <div className="rounded-lg border p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Segment {segment.index + 1}</h3>
-        {segment.type !== 'original' && (
-          <button
-            onClick={() => onReset(segment.index)}
-            className="text-xs text-red-500 hover:underline"
-          >
-            Reset
-          </button>
-        )}
+    <div className="rounded-lg border flex flex-col h-full max-h-[calc(100vh-120px)]">
+      <div className="p-3 border-b shrink-0">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Segment {segment.index + 1}</h3>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => onReset(segment.index)}
+              className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted"
+            >
+              Reset
+            </button>
+            <button
+              onClick={() => onDeleteSegment(segment.index)}
+              className="text-xs text-red-500 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+
+        <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{segment.text}</p>
+
+        <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground">
+          <span>{formatTime(segment.startMs)} - {formatTime(segment.endMs)}</span>
+          <span className="px-1.5 py-0.5 rounded-full bg-muted text-[10px]">
+            {typeLabels[segment.type] || segment.type}
+          </span>
+        </div>
       </div>
 
-      <p className="text-sm text-muted-foreground leading-relaxed">{segment.text}</p>
-
-      <div className="text-xs text-muted-foreground space-x-4">
-        <span>Start: {formatTime(segment.startMs)}</span>
-        <span>End: {formatTime(segment.endMs)}</span>
-        <span>Type: {typeLabels[segment.type] || segment.type}</span>
-      </div>
-
-      {segment.brollUrl && (
-        <div className="text-xs text-muted-foreground truncate">
-          B-roll: {segment.brollUrl}
+      {segment.type !== 'original' && segment.brollPrompt && (
+        <div className="px-3 py-1.5 bg-muted/50 border-b shrink-0">
+          <p className="text-xs text-muted-foreground">
+            B-roll prompt: <span className="font-medium text-foreground">{segment.brollPrompt}</span>
+          </p>
         </div>
       )}
 
-      <div className="border-t pt-4 space-y-3">
-        <div className="flex gap-1 border-b">
-          <button
-            onClick={() => setTab('upload')}
-            className={`text-xs px-3 py-1.5 -mb-px ${tab === 'upload' ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground'}`}
-          >
-            Upload
-          </button>
-          <button
-            onClick={() => setTab('generate')}
-            className={`text-xs px-3 py-1.5 -mb-px ${tab === 'generate' ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground'}`}
-          >
-            Generate
-          </button>
-        </div>
-
-        {tab === 'upload' ? (
-          <div className="space-y-2">
-            <input
-              type="url"
-              value={brollUrl}
-              onChange={(e) => setBrollUrl(e.target.value)}
-              placeholder="B-roll video URL or file path"
-              className="w-full rounded-md border px-3 py-1.5 text-xs"
-            />
-            <button
-              onClick={() => {
-                if (brollUrl.trim()) {
-                  onApplyBroll(segment.index, 'broll_upload', brollUrl.trim());
-                  setBrollUrl('');
-                }
-              }}
-              disabled={!brollUrl.trim()}
-              className="w-full rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-            >
-              Apply B-roll
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <textarea
-              value={brollPrompt}
-              onChange={(e) => setBrollPrompt(e.target.value)}
-              placeholder="Describe the b-roll you want: e.g. 'explosion effect with subscribe text'"
-              rows={3}
-              className="w-full rounded-md border px-3 py-1.5 text-xs resize-none"
-            />
-            <button
-              onClick={() => {
-                if (brollPrompt.trim()) {
-                  onGenerateBroll(segment.index, brollPrompt.trim());
-                  setBrollPrompt('');
-                }
-              }}
-              disabled={!brollPrompt.trim()}
-              className="w-full rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-            >
-              Generate AI B-roll
-            </button>
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
+        {messages.length === 0 && (
+          <div className="text-center py-4">
+            <p className="text-xs text-muted-foreground mb-3">
+              Describe the b-roll motion graphic for this segment
+            </p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {QUICK_PROMPTS.map((qp) => (
+                <button
+                  key={qp.label}
+                  onClick={() => handleQuickPrompt(qp.prompt)}
+                  className="text-left text-xs px-2.5 py-1.5 rounded-md border hover:bg-muted/50 transition-colors"
+                >
+                  <span className="mr-1">{qp.icon}</span>
+                  {qp.label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
+
+        {messages.map((msg, i) => (
+          <div
+            key={i}
+            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div
+              className={`max-w-[85%] rounded-lg px-3 py-2 text-xs ${
+                msg.role === 'user'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted border'
+              }`}
+            >
+              <p>{msg.content}</p>
+              {msg.previewUrl && (
+                <div className="mt-2">
+                  <video
+                    src={msg.previewUrl}
+                    controls
+                    className="w-full rounded max-h-32"
+                    preload="metadata"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+
+        {isGenerating && (
+          <div className="flex justify-start">
+            <div className="bg-muted border rounded-lg px-3 py-2 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                Generating b-roll video...
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div ref={chatEndRef} />
+      </div>
+
+      <div className="p-3 border-t shrink-0">
+        <div className="flex gap-1.5">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            placeholder="Describe the b-roll you want..."
+            className="flex-1 rounded-md border px-3 py-1.5 text-xs bg-background"
+            disabled={isGenerating}
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || isGenerating}
+            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 shrink-0"
+          >
+            Send
+          </button>
+        </div>
       </div>
     </div>
   );
