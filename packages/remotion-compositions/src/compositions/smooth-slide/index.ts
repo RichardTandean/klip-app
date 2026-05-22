@@ -1,0 +1,1 @@
+export { SmoothSlide } from './Composition';

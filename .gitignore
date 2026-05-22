@@ -1,0 +1,58 @@
+# ========================
+# General
+# ========================
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+*.log
+*.log.*
+.vscode/*
+!.vscode/settings.json
+.idea/
+
+# ========================
+# Environment
+# ========================
+.env
+.env.local
+.env.*.local
+.env.production
+
+# ========================
+# OS
+# ========================
+.DS_Store
+Thumbs.db
+
+# ========================
+# Python
+# ========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.env.py
+
+# ========================
+# Temp
+# ========================
+tmp/
+temp/
+*.tmp
+
+# ========================
+# Docker
+# ========================
+data/
+
+# ========================
+# Security
+# ========================
+*.pem
+*.key
+*.crt
+credentials.json

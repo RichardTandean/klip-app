@@ -1,0 +1,1 @@
+export { KineticText } from './Composition';

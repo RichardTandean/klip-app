@@ -1,0 +1,1 @@
+export { IconBurst } from './Composition';
